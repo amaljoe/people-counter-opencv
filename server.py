@@ -80,7 +80,7 @@ def count_people():
                     help="path to optional output video file")
     ap.add_argument("-c", "--confidence", type=float, default=0.4,
                     help="minimum probability to filter weak detections")
-    ap.add_argument("-s", "--skip-frames", type=int, default=5,
+    ap.add_argument("-s", "--skip-frames", type=int, default=30,
                     help="# of skip frames between detections")
     args = vars(ap.parse_args())
 
@@ -132,8 +132,6 @@ def count_people():
 
     # loop over frames from the video stream
     while True:
-        # grab the next frame and handle if we are reading from either
-        # VideoCapture or VideoStream
         URL = "http://192.168.29.211:8080/shot.jpg"
         # img_arr = np.array(bytearray(urllib.request.urlopen(URL).read()), dtype=np.uint8)
         # img = cv2.imdecode(img_arr, -1)
@@ -143,8 +141,9 @@ def count_people():
         # if we are viewing a video and we did not grab a frame then we
         # have reached the end of the video
         if args["input"] is not None and frame is None:
-            break
-            # TODO: loop here instead of break
+            vs.release()
+            vs = cv2.VideoCapture(args["input"])
+            continue
 
         # resize the frame to have a maximum width of 500 pixels (the
         # less data we have, the faster we can process it), then convert
