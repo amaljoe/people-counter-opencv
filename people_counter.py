@@ -27,6 +27,7 @@ from flask import render_template
 # exchanges of the output frames (useful when multiple browsers/tabs
 # are viewing the stream)
 outputFrame = None
+lastFrame = None
 lock = threading.Lock()
 # initialize a flask object
 app = Flask(__name__)
@@ -40,7 +41,7 @@ def index():
 
 def generate():
     # grab global references to the output frame and lock variables
-    global outputFrame, lock
+    global outputFrame, lock, lastFrame
     # loop over frames from the output stream
     while True:
         # wait until the lock is acquired
@@ -49,11 +50,15 @@ def generate():
             # the iteration of the loop
             if outputFrame is None:
                 continue
+            if outputFrame is not None and lastFrame is not None:
+                if (outputFrame == lastFrame).all():
+                    continue
             # encode the frame in JPEG format
             (flag, encodedImage) = cv2.imencode(".jpg", outputFrame)
             # ensure the frame was successfully encoded
             if not flag:
                 continue
+        lastFrame = outputFrame
         # yield the output frame in the byte format
         yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' +
                bytearray(encodedImage) + b'\r\n')
@@ -85,7 +90,7 @@ ap.add_argument("-p", "--prototxt", default="mobilenet_ssd/MobileNetSSD_deploy.p
                 help="path to Caffe 'deploy' prototxt file")
 ap.add_argument("-m", "--model", default="mobilenet_ssd/MobileNetSSD_deploy.caffemodel",
                 help="path to Caffe pre-trained model")
-ap.add_argument("-i", "--input", type=str, default="videos/example_01.mp4",
+ap.add_argument("-i", "--input", type=str,
                 help="path to optional input video file")
 ap.add_argument("-o", "--output", type=str,
                 help="path to optional output video file")
@@ -146,9 +151,9 @@ while True:
     # grab the next frame and handle if we are reading from either
     # VideoCapture or VideoStream
     URL = "http://192.168.29.211:8080/shot.jpg"
-    # img_arr = np.array(bytearray(urllib.request.urlopen(URL).read()), dtype=np.uint8)
-    # img = cv2.imdecode(img_arr, -1)
-    frame = vs.read()
+    img_arr = np.array(bytearray(urllib.request.urlopen(URL).read()), dtype=np.uint8)
+    img = cv2.imdecode(img_arr, -1)
+    frame = img
     frame = frame[1] if args.get("input", False) else frame
 
     # if we are viewing a video and we did not grab a frame then we
