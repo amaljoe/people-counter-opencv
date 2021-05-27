@@ -2,6 +2,7 @@
 import argparse
 import threading
 import cv2
+import fpstimer
 from flask import Response
 from flask import Flask
 import cv2
@@ -15,12 +16,16 @@ import imutils
 import time
 import dlib
 from flask import render_template
+import database
+
 
 app = Flask(__name__)
 
 outputFrame = None
 lastFrame = None
 lock = threading.Lock()
+totalUp = 0
+totalDown = 0
 
 
 @app.route("/")
@@ -31,6 +36,7 @@ def index():
 def generate():
     global outputFrame, lastFrame, lock
     # loop over frames from the output stream
+    timer = fpstimer.FPSTimer(15)
     while True:
         # wait until the lock is acquired
         with lock:
@@ -50,6 +56,7 @@ def generate():
         # yield the output frame in the byte format
         yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' +
                bytearray(encodedImage) + b'\r\n')
+        timer.sleep()
 
 
 @app.route("/video_feed")
@@ -67,7 +74,7 @@ def runApp():
 
 
 def count_people():
-    global outputFrame
+    global outputFrame, totalDown, totalUp
     # construct the argument parse and parse the arguments
     ap = argparse.ArgumentParser()
     ap.add_argument("-p", "--prototxt", default="mobilenet_ssd/MobileNetSSD_deploy.prototxt",
@@ -129,6 +136,7 @@ def count_people():
 
     # start the frames per second throughput estimator
     fps = FPS().start()
+    timer = fpstimer.FPSTimer(30)
 
     # loop over frames from the video stream
     while True:
@@ -141,6 +149,7 @@ def count_people():
         # if we are viewing a video and we did not grab a frame then we
         # have reached the end of the video
         if args["input"] is not None and frame is None:
+            # break
             vs.release()
             vs = cv2.VideoCapture(args["input"])
             continue
@@ -170,7 +179,7 @@ def count_people():
 
         # check to see if we should run a more computationally expensive
         # object detection method to aid our tracker
-        if totalFrames % args["skip_frames"] == 0:
+        if totalFrames % 30 == 0:
             # set the status and initialize our new set of object trackers
             status = "Detecting"
             trackers = []
@@ -189,7 +198,7 @@ def count_people():
 
                 # filter out weak detections by requiring a minimum
                 # confidence
-                if confidence > args["confidence"]:
+                if confidence > 0.4:
                     # extract the index of the class label from the
                     # detections list
                     idx = int(detections[0, 0, i, 1])
@@ -323,6 +332,7 @@ def count_people():
         # then update the FPS counter
         totalFrames += 1
         fps.update()
+        timer.sleep()
 
     # stop the timer and display FPS information
     fps.stop()
@@ -345,9 +355,32 @@ def count_people():
     cv2.destroyAllWindows()
 
 
+def update_db():
+    timer = fpstimer.FPSTimer(0.3)
+    last_inside = -999
+    last_down = 0
+    last_up = 0
+    while True:
+        inside = totalDown - totalUp
+        if totalUp != last_up:
+            database.leave_store(totalUp - last_up)
+            last_up = totalUp
+        if totalDown != last_down:
+            database.enter_store(totalDown - last_down)
+            last_down = totalDown
+        if inside != last_inside:
+            database.update_status(inside)
+            last_inside = inside
+        timer.sleep()
+
+
 if __name__ == '__main__':
-    # start a thread that will per form motion detection
-    t = threading.Thread(target=count_people)
-    t.daemon = True
-    t.start()
+    # start a thread that will perform motion detection
+    counter = threading.Thread(target=count_people)
+    counter.daemon = True
+    counter.start()
+    # start a thread that will update DB
+    dbUpdater = threading.Thread(target=update_db)
+    dbUpdater.daemon = True
+    dbUpdater.start()
     runApp()
